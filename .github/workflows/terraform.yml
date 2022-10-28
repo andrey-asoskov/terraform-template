@@ -1,0 +1,147 @@
+---
+name: Terraform Test
+on:
+  pull_request:
+    branches:
+      - '**'
+    paths:
+      - .github/workflows/terraform.yml
+      - Terraform/**
+      - .checkov.yaml
+  push:
+    branches:
+      - '**'
+    paths:
+      - .github/workflows/terraform.yml
+      - Terraform/**
+      - .checkov.yaml
+
+jobs:
+  terraform-test:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.3.3
+      - name: Terraform Init
+        id: terraform-init
+        run: |
+          # set -x
+
+          mkdir -p "$HOME/.terraform.d/plugin-cache"
+          echo 'plugin_cache_dir   = "$HOME/.terraform.d/plugin-cache"' > $HOME/.terraformrc
+
+          cd ./Terraform/
+          for d in $(find ./modules -maxdepth 1 -mindepth 1 -type d| sort -n);do
+            terraform -chdir=$d init -input=false
+          done
+
+          for d in $(find ./components -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            terraform -chdir=$d init -input=false
+          done
+      - name: Terraform fmt
+        id: terraform-fmt
+        run: |
+          cd ./Terraform/
+          for d in $(find ./modules  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            terraform -chdir=$d fmt -check
+          done
+
+          for d in $(find ./components  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            terraform -chdir=$d fmt -check
+          done
+
+      - name: Terraform Validate
+        id: terraform-validate
+        run: |
+          cd ./Terraform/
+          for d in $(find ./modules  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            terraform -chdir=$d validate -no-color .
+          done
+
+          for d in $(find ./components  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            terraform -chdir=$d validate -no-color .
+          done
+
+      - name: Install Terraform Lint
+        id: install-terraform-lint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+          cd ./Terraform/
+          tflint --init -c ./.tflint.hcl
+
+      - name: Terraform Lint
+        id: terraform-lint
+        run: |
+          # set -x
+          cd ./Terraform/
+          for d in $(find ./modules  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            cd $d
+            tflint -c ../../.tflint.hcl .
+            cd ../../
+          done
+
+          for d in $(find ./components  -maxdepth 1 -mindepth 1 -type d | sort -n);do
+            cd $d
+            tflint -c ../../.tflint.hcl .
+            cd ../../
+          done
+
+      - name: Install Terraform Sec
+        id: install-terraform-sec
+        run: |
+          set -x
+          wget https://github.com/aquasecurity/tfsec/releases/download/v1.28.1/tfsec-linux-amd64 -O ./Terraform/tfsec
+          chmod +x ./Terraform/tfsec
+
+      - name: Terraform Sec
+        id: terraform-sec
+        run: |
+          cd ./Terraform
+          ./tfsec . --config-file ./tfsec.yml --force-all-dirs
+
+      - name: tfsec
+        uses: aquasecurity/tfsec-sarif-action@v0.1.0
+        with:
+          # working_directory: Terraform
+          config_file: ./Terraform/.tflint.hcl
+          # sarif_file: tfsec.sarif
+          full_repo_scan: true
+
+      - name: Upload TfSec SARIF file
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfsec.sarif
+          path: tfsec.sarif
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: 3.9.14 # Version range or exact version of a Python version to use, using SemVer's version range syntax
+          architecture: x64
+
+      - name: Checkov Manual Run
+        id: checkov-manual
+        run: |
+          set -x
+          pip install checkov
+          checkov -d . --config-file ./.checkov.yaml
+
+      - name: Run Checkov action
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          config_file: .checkov.yaml
+          output_format: sarif
+          quiet: false
+
+      - name: Upload Checkov SARIF file
+        uses: actions/upload-artifact@v3
+        with:
+          name: checkov.sarif
+          path: results.sarif

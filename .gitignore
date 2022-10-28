@@ -1,0 +1,22 @@
+# Local .terraform directories
+**/.terraform/*
+**/.terraform.lock.hcl
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+
+#Temp
+Temp/
+
+# OSX
+**/.DS_Store
+
+#Vagrant
+.vagrant/
+
+#Zip
+*.zip
